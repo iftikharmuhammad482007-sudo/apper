@@ -1,0 +1,8 @@
+{
+  "name": "Apper AI",
+  "description": "An AI assistant that generates, previews, and simulates publishing functional React web applications from simple text prompts.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
