@@ -3,9 +3,10 @@ import React, { useEffect, useRef, useState } from 'react';
 
 interface AppPreviewProps {
   code: string;
+  minimal?: boolean;
 }
 
-const AppPreview: React.FC<AppPreviewProps> = ({ code }) => {
+const AppPreview: React.FC<AppPreviewProps> = ({ code, minimal = false }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [key, setKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -16,11 +17,10 @@ const AppPreview: React.FC<AppPreviewProps> = ({ code }) => {
       return;
     }
 
-    // Clean code to remove potential dangerous patterns or imports that break Babel Standalone
     const processedCode = code
-      .replace(/import\s+.*\s+from\s+['"].*['"];?/g, '') // Remove imports
-      .replace(/export\s+default\s+/g, 'const GeneratedApp = ') // Convert export default to const
-      .replace(/export\s+/g, ''); // Remove other exports
+      .replace(/import\s+.*\s+from\s+['"].*['"];?/g, '')
+      .replace(/export\s+default\s+/g, 'const GeneratedApp = ')
+      .replace(/export\s+/g, '');
 
     const template = `
       <!DOCTYPE html>
@@ -43,10 +43,7 @@ const AppPreview: React.FC<AppPreviewProps> = ({ code }) => {
               font-family: 'Inter', sans-serif; 
             }
             #preview-root { min-height: 100vh; display: flex; flex-direction: column; }
-            ::-webkit-scrollbar { width: 8px; }
-            ::-webkit-scrollbar-track { background: #f1f1f1; }
-            ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
-            ::-webkit-scrollbar-thumb:hover { background: #bbb; }
+            ::-webkit-scrollbar { width: 0px; background: transparent; }
             
             #error-overlay {
               position: fixed;
@@ -65,17 +62,17 @@ const AppPreview: React.FC<AppPreviewProps> = ({ code }) => {
           <div id="error-overlay"></div>
           
           <script type="text/babel">
-            // Expose hooks to global scope for AI-generated code
-            window.useState = React.useState;
-            window.useEffect = React.useEffect;
-            window.useContext = React.useContext;
-            window.useReducer = React.useReducer;
-            window.useCallback = React.useCallback;
-            window.useMemo = React.useMemo;
-            window.useRef = React.useRef;
-            window.useImperativeHandle = React.useImperativeHandle;
-            window.useLayoutEffect = React.useLayoutEffect;
-            window.useDebugValue = React.useDebugValue;
+            const { useState, useEffect, useContext, useReducer, useCallback, useMemo, useRef, useImperativeHandle, useLayoutEffect, useDebugValue } = React;
+            window.useState = useState;
+            window.useEffect = useEffect;
+            window.useContext = useContext;
+            window.useReducer = useReducer;
+            window.useCallback = useCallback;
+            window.useMemo = useMemo;
+            window.useRef = useRef;
+            window.useImperativeHandle = useImperativeHandle;
+            window.useLayoutEffect = useLayoutEffect;
+            window.useDebugValue = useDebugValue;
 
             const showError = (msg) => {
               const overlay = document.getElementById('error-overlay');
@@ -89,7 +86,6 @@ const AppPreview: React.FC<AppPreviewProps> = ({ code }) => {
             };
 
             try {
-              // The generated code
               ${processedCode}
 
               const AppWrapper = () => {
@@ -106,7 +102,6 @@ const AppPreview: React.FC<AppPreviewProps> = ({ code }) => {
 
                 try {
                   const TargetComponent = window.GeneratedApp || (typeof GeneratedApp !== 'undefined' ? GeneratedApp : null);
-                  
                   if (!TargetComponent) {
                     return (
                       <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
@@ -115,7 +110,6 @@ const AppPreview: React.FC<AppPreviewProps> = ({ code }) => {
                       </div>
                     );
                   }
-
                   return <TargetComponent />;
                 } catch (err) {
                   setMountError(err.toString());
@@ -145,43 +139,38 @@ const AppPreview: React.FC<AppPreviewProps> = ({ code }) => {
   if (!code) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50 dark:bg-slate-900/30 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 transition-colors">
-        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-6">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-          </svg>
-        </div>
-        <p className="text-xl font-semibold text-slate-600 dark:text-slate-300">Start Building Your Idea</p>
-        <p className="text-sm mt-2 max-w-xs text-center">Describe what you want to build and Apper will create a functional app for you.</p>
+        <p className="text-xl font-semibold text-slate-600 dark:text-slate-300">Ready to Launch</p>
       </div>
     );
   }
 
   return (
-    <div className="relative w-full h-full bg-white dark:bg-[#1e1f20] rounded-xl overflow-hidden shadow-sm flex flex-col border border-[#dadce0] dark:border-[#444746]">
-      <div className="h-10 bg-[#f1f3f4] dark:bg-[#2d2e30] border-b border-[#dadce0] dark:border-[#444746] flex items-center px-4 justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1.5 mr-4">
-            <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-            <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
-            <div className="w-3 h-3 rounded-full bg-[#28c840]" />
+    <div className={`relative w-full h-full bg-white overflow-hidden flex flex-col ${minimal ? '' : 'rounded-xl shadow-sm border border-[#dadce0] dark:border-[#444746]'}`}>
+      {!minimal && (
+        <div className="h-10 bg-[#f1f3f4] dark:bg-[#2d2e30] border-b border-[#dadce0] dark:border-[#444746] flex items-center px-4 justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1.5 mr-4">
+              <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
+              <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
+              <div className="w-3 h-3 rounded-full bg-[#28c840]" />
+            </div>
+            <div className="h-6 w-64 bg-white dark:bg-[#1e1f20] border border-[#dadce0] dark:border-[#444746] rounded-md flex items-center px-2 text-[10px] text-slate-400 truncate">
+              https://local.apper-preview.internal/app
+            </div>
           </div>
-          <div className="h-6 w-64 bg-white dark:bg-[#1e1f20] border border-[#dadce0] dark:border-[#444746] rounded-md flex items-center px-2 text-[10px] text-slate-400 truncate">
-            https://local.apper-preview.internal/app
-          </div>
+          <button 
+            onClick={handleRefresh}
+            className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md text-slate-500 dark:text-slate-400 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          </button>
         </div>
-        <button 
-          onClick={handleRefresh}
-          className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md text-slate-500 dark:text-slate-400 transition-colors"
-          title="Refresh Preview"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-        </button>
-      </div>
+      )}
       
       <iframe 
         ref={iframeRef} 
         key={key}
-        className="w-full flex-1 bg-white" 
+        className="w-full flex-1 bg-white border-none" 
         title="App Preview"
         sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
       />

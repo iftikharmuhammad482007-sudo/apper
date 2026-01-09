@@ -1,65 +1,8 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { generateAppCode } from './services/geminiService';
-import { Message, AppState, DeployedApp } from './types';
+import { Message, AppState } from './types';
 import AppPreview from './components/AppPreview';
-
-const FEATURED_APPS: DeployedApp[] = [
-  {
-    id: 'f1',
-    name: 'Task Flow Pro',
-    description: 'A minimalist productivity dashboard with kanban boards and pomodoro timers.',
-    author: 'Apper Official',
-    timestamp: Date.now() - 86400000,
-    code: `const GeneratedApp = () => {
-      const [tasks, setTasks] = useState([{id: 1, text: 'Design UI', status: 'todo'}, {id: 2, text: 'Implement State', status: 'done'}]);
-      return (
-        <div className="p-8 bg-slate-50 min-h-screen font-sans">
-          <h1 className="text-3xl font-bold mb-6 text-slate-800 tracking-tight">Task Flow Pro</h1>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {['todo', 'in-progress', 'done'].map(status => (
-              <div key={status} className="bg-slate-200/50 p-4 rounded-2xl border border-slate-300/50 backdrop-blur-sm">
-                <h2 className="uppercase text-[10px] font-black text-slate-400 mb-4 tracking-widest">{status}</h2>
-                {tasks.filter(t => t.status === status).map(t => (
-                  <div key={t.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-3 hover:shadow-md transition-shadow cursor-pointer">{t.text}</div>
-                ))}
-                <button className="w-full py-2 border-2 border-dashed border-slate-300 rounded-xl text-slate-400 text-xs font-bold hover:bg-slate-100 transition-colors">+ Add Task</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    };`
-  },
-  {
-    id: 'f2',
-    name: 'Aether Weather',
-    description: 'Glassmorphic weather forecast application with dynamic background effects.',
-    author: 'Apper Official',
-    timestamp: Date.now() - 172800000,
-    code: `const GeneratedApp = () => {
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-6 font-sans">
-          <div className="bg-white/20 backdrop-blur-xl border border-white/30 rounded-[2.5rem] p-10 text-white w-full max-w-md shadow-2xl">
-            <div className="flex justify-between items-start mb-8">
-              <div>
-                <h1 className="text-4xl font-bold mb-1">London</h1>
-                <p className="opacity-80">Monday, 12:45 PM</p>
-              </div>
-              <div className="text-6xl">☀️</div>
-            </div>
-            <div className="text-8xl font-black mb-8 tracking-tighter">24°</div>
-            <div className="grid grid-cols-3 gap-4 border-t border-white/20 pt-8">
-              <div className="text-center"><div className="opacity-60 text-xs uppercase mb-1">Wind</div><div className="font-bold">12km/h</div></div>
-              <div className="text-center"><div className="opacity-60 text-xs uppercase mb-1">Hum</div><div className="font-bold">45%</div></div>
-              <div className="text-center"><div className="opacity-60 text-xs uppercase mb-1">Rain</div><div className="font-bold">0%</div></div>
-            </div>
-          </div>
-        </div>
-      );
-    };`
-  }
-];
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>({
@@ -74,21 +17,43 @@ const App: React.FC = () => {
     return params.has('p') ? 'editor' : 'portal';
   });
 
+  const [isLoadingGateway, setIsLoadingGateway] = useState(false);
   const [prompt, setPrompt] = useState('');
-  const [systemInstruction, setSystemInstruction] = useState('You are a helpful assistant specialized in building React web apps.');
   const [activeTab, setActiveTab] = useState<'preview' | 'code'>('preview');
-  const [engineError, setEngineError] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  
+
+  // DETECT PRODUCTION MODE (When visiting a shared ?p= URL)
+  const isProduction = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.has('p') && params.get('mode') !== 'edit';
+  }, []);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
+  // Robust decoding logic
   useEffect(() => {
-    scrollToBottom();
-  }, [appState.messages]);
+    const params = new URLSearchParams(window.location.search);
+    const encodedCode = params.get('p');
+    
+    if (encodedCode) {
+      if (isProduction) setIsLoadingGateway(true);
+      
+      try {
+        const decoded = decodeURIComponent(escape(atob(encodedCode)));
+        setAppState(prev => ({ ...prev, currentCode: decoded }));
+        
+        const domain = params.get('domain');
+        if (domain) document.title = domain;
+
+        if (isProduction) {
+          setTimeout(() => setIsLoadingGateway(false), 800);
+        }
+      } catch (e) {
+        console.error("Link Error:", e);
+        setIsLoadingGateway(false);
+      }
+    }
+  }, [isProduction]);
 
   const handleSend = async () => {
     if (!prompt.trim() || appState.isGenerating) return;
@@ -109,107 +74,134 @@ const App: React.FC = () => {
     
     const currentPrompt = prompt;
     setPrompt('');
-    setEngineError(null);
 
     try {
-      const { text, code } = await generateAppCode(currentPrompt, appState.messages, systemInstruction);
+      const { text, code } = await generateAppCode(currentPrompt, appState.messages);
       
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: text,
-        code: code || appState.currentCode,
-        timestamp: Date.now(),
-      };
-
       setAppState(prev => ({
         ...prev,
-        messages: [...prev.messages, assistantMessage],
+        messages: [...prev.messages, { role: 'assistant', content: text, code: code || prev.currentCode, timestamp: Date.now() }],
         currentCode: code || prev.currentCode,
         isGenerating: false,
         status: 'idle',
       }));
       
-      if (code) {
-        setActiveTab('preview');
-      }
+      if (code) setActiveTab('preview');
     } catch (error: any) {
-      console.error(error);
-      setEngineError(error.message || "An unexpected error occurred.");
-      setAppState(prev => ({
-        ...prev,
-        isGenerating: false,
-        status: 'error',
-      }));
+      setAppState(prev => ({ ...prev, isGenerating: false, status: 'error' }));
     }
   };
 
-  const loadApp = (app: DeployedApp) => {
-    setAppState({
-      messages: [
-        {
-          role: 'assistant',
-          content: `Loaded app: ${app.name}. You can now modify it by describing changes.`,
-          code: app.code,
-          timestamp: Date.now()
-        }
-      ],
-      currentCode: app.code,
-      isGenerating: false,
-      status: 'idle'
-    });
-    setViewMode('editor');
-    setActiveTab('preview');
+  const generateStandaloneHTML = (code: string, title: string) => {
+    const processedCode = code
+      .replace(/import\s+.*\s+from\s+['"].*['"];?/g, '')
+      .replace(/export\s+default\s+/g, 'const GeneratedApp = ')
+      .replace(/export\s+/g, '');
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; padding: 0; min-height: 100vh; font-family: 'Inter', sans-serif; background-color: #ffffff; }
+        #root { min-height: 100vh; }
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo, useCallback, useContext, useReducer } = React;
+        window.useState = useState; window.useEffect = useEffect; window.useRef = useRef;
+        window.useMemo = useMemo; window.useCallback = useCallback;
+        window.useContext = useContext; window.useReducer = useReducer;
+
+        ${processedCode}
+
+        const App = () => {
+            const Target = window.GeneratedApp || (typeof GeneratedApp !== 'undefined' ? GeneratedApp : null);
+            if (!Target) return <div style={{padding: '2rem', textAlign: 'center', color: '#666'}}>App Component Not Found</div>;
+            return <Target />;
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>`;
   };
+
+  const handleDownloadHTML = () => {
+    const htmlContent = generateStandaloneHTML(appState.currentCode, 'Apper Exported App');
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `apper-app-${Date.now()}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleViewLiveInBrowser = () => {
+    if (!appState.currentCode) return;
+    const htmlContent = generateStandaloneHTML(appState.currentCode, 'Apper Preview');
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  };
+
+  if (isLoadingGateway) {
+    return (
+      <div className="h-screen w-screen bg-white flex flex-col items-center justify-center text-slate-900 font-sans overflow-hidden">
+        <div className="relative mb-6">
+          <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white font-black italic text-3xl shadow-2xl animate-pulse">A</div>
+        </div>
+        <div className="text-sm font-bold tracking-tight mb-1 text-slate-400">LOADING...</div>
+      </div>
+    );
+  }
+
+  if (isProduction) {
+    return (
+      <div className="h-screen w-screen overflow-hidden bg-white">
+        <AppPreview code={appState.currentCode} minimal={true} />
+        <div className="fixed bottom-4 right-4 opacity-0 hover:opacity-100 transition-opacity">
+          <button 
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.set('mode', 'edit');
+              window.location.href = url.toString();
+            }}
+            className="p-3 bg-slate-900/10 hover:bg-indigo-600 rounded-xl text-slate-400 hover:text-white transition-all backdrop-blur-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (viewMode === 'portal') {
     return (
-      <div className={`min-h-screen ${isDarkMode ? 'dark bg-slate-950' : 'bg-slate-50'}`}>
-        <div className="max-w-6xl mx-auto px-6 py-12">
-          <header className="flex justify-between items-center mb-12">
-            <div>
-              <h1 className={`text-4xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Apper Portal</h1>
-              <p className={`mt-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Explore community creations or build your own.</p>
-            </div>
-            <div className="flex gap-4">
-              <button 
-                onClick={() => setIsDarkMode(!isDarkMode)}
-                className={`p-2 rounded-full border ${isDarkMode ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}
-              >
-                {isDarkMode ? '🌙' : '☀️'}
-              </button>
-              <button 
-                onClick={() => setViewMode('editor')}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-full font-bold transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
-              >
-                Create New App
-              </button>
-            </div>
-          </header>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {FEATURED_APPS.map(app => (
-              <div 
-                key={app.id} 
-                className={`group rounded-[2rem] border transition-all hover:shadow-2xl overflow-hidden cursor-pointer ${
-                  isDarkMode ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/50' : 'bg-white border-slate-200 hover:border-indigo-500'
-                }`}
-                onClick={() => loadApp(app)}
-              >
-                <div className="h-48 bg-slate-100 dark:bg-slate-800 relative">
-                  <div className="absolute inset-0 flex items-center justify-center text-4xl group-hover:scale-110 transition-transform">
-                    {app.name.includes('Weather') ? '🌤️' : '📝'}
-                  </div>
-                </div>
-                <div className="p-6">
-                  <h3 className={`text-xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{app.name}</h3>
-                  <p className={`text-sm mb-4 line-clamp-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{app.description}</p>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">{app.author}</span>
-                    <button className="text-indigo-600 font-bold text-sm">Open →</button>
-                  </div>
-                </div>
-              </div>
-            ))}
+      <div className={`min-h-screen ${isDarkMode ? 'dark bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'} transition-colors flex flex-col items-center justify-center p-8`}>
+        <div className="max-w-2xl w-full text-center space-y-12">
+          <div className="flex flex-col items-center gap-6">
+             <div className="w-24 h-24 bg-indigo-600 rounded-[2.5rem] flex items-center justify-center text-white font-black italic text-5xl shadow-2xl">A</div>
+             <h1 className="text-6xl font-black tracking-tighter italic">Apper Studio</h1>
+             <p className="text-slate-500 max-w-md mx-auto">Generate React applications with AI and export them as standalone HTML files for offline use.</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <button onClick={() => setViewMode('editor')} className="bg-indigo-600 text-white px-12 py-5 rounded-3xl font-black uppercase tracking-widest shadow-2xl hover:scale-105 active:scale-95 transition-all">New Project</button>
+            <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">{isDarkMode ? '🌙 Dark Mode' : '☀️ Light Mode'}</button>
           </div>
         </div>
       </div>
@@ -217,121 +209,85 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden ${isDarkMode ? 'dark bg-slate-950' : 'bg-white'}`}>
-      <nav className={`h-14 border-b flex items-center px-4 justify-between shrink-0 ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden transition-colors ${isDarkMode ? 'dark bg-slate-950 text-white' : 'bg-white text-slate-900'}`}>
+      <nav className={`h-20 border-b flex items-center px-8 justify-between shrink-0 z-10 ${isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200 shadow-sm'} backdrop-blur-xl`}>
+        <button onClick={() => setViewMode('portal')} className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black italic text-xl shadow-lg">A</div>
+          <span className="text-2xl font-black tracking-tighter text-indigo-600 italic uppercase">Apper</span>
+        </button>
         <div className="flex items-center gap-4">
-          <button onClick={() => setViewMode('portal')} className="text-lg font-black tracking-tighter text-indigo-600">APPER</button>
-          <div className={`h-4 w-px ${isDarkMode ? 'bg-slate-800' : 'bg-slate-200'}`} />
-          <span className={`text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-            {appState.messages.length > 0 ? 'Editing Project' : 'New Project'}
-          </span>
-        </div>
-        
-        <div className="flex items-center gap-3">
+           <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
+             {isDarkMode ? '☀️' : '🌙'}
+           </button>
           <button 
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            className={`p-2 rounded-lg ${isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}
+            onClick={handleDownloadHTML}
+            disabled={!appState.currentCode || appState.isGenerating}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-10 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl disabled:opacity-50 transition-all flex items-center gap-2"
           >
-            {isDarkMode ? '🌙' : '☀️'}
-          </button>
-          <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold transition-all shadow-sm">
-            Publish
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Download HTML
           </button>
         </div>
       </nav>
 
       <main className="flex-1 flex overflow-hidden">
-        {/* Left: Chat Sidebar */}
-        <div className={`w-80 flex flex-col border-r shrink-0 ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {appState.messages.length === 0 && (
-              <div className="text-center py-8">
-                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-xl">✨</div>
-                <h2 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Start a Project</h2>
-                <p className="text-xs text-slate-500 mt-2 px-4">Describe the application you want to build in plain English.</p>
-              </div>
-            )}
+        <div className={`w-[450px] flex flex-col border-r shrink-0 ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+          <div className="flex-1 overflow-y-auto p-8 space-y-8 no-scrollbar">
             {appState.messages.map((msg, i) => (
-              <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                <div className={`max-w-[90%] p-3 rounded-2xl text-sm ${
-                  msg.role === 'user' 
-                    ? 'bg-indigo-600 text-white rounded-tr-none' 
-                    : `${isDarkMode ? 'bg-slate-800 text-slate-200' : 'bg-white border border-slate-200 text-slate-700'} rounded-tl-none`
+              <div key={i} className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div className={`max-w-[85%] p-6 rounded-[1.8rem] text-sm leading-relaxed shadow-sm ${
+                  msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : `${isDarkMode ? 'bg-slate-800 text-slate-200 border border-slate-700' : 'bg-white border border-slate-200 text-slate-700'} rounded-tl-none`
                 }`}>
                   {msg.content}
                 </div>
               </div>
             ))}
-            {appState.isGenerating && (
-              <div className="flex gap-2 items-center text-indigo-500 text-xs font-bold animate-pulse">
-                <span className="w-2 h-2 bg-indigo-500 rounded-full" />
-                Apper is building...
-              </div>
-            )}
-            {engineError && (
-              <div className="p-3 bg-red-50 border border-red-100 text-red-600 text-xs rounded-xl">
-                <strong>Error:</strong> {engineError}
-              </div>
-            )}
+            {appState.isGenerating && <div className="p-4 text-[10px] font-black uppercase tracking-widest text-indigo-600 animate-pulse text-center">Architecting...</div>}
             <div ref={messagesEndRef} />
           </div>
 
-          <div className={`p-4 border-t ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+          <div className="p-8 border-t">
             <div className="relative">
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                placeholder="Make it blue and add a login form..."
-                className={`w-full p-3 pr-10 text-sm rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none h-24 ${
-                  isDarkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900'
-                }`}
+                placeholder="Describe your browser app..."
+                className={`w-full p-6 pr-16 text-sm rounded-[2rem] border-2 outline-none h-32 resize-none transition-all ${isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-100 border-slate-100 text-slate-900 focus:border-indigo-500 shadow-inner'}`}
               />
-              <button 
-                onClick={handleSend}
-                disabled={!prompt.trim() || appState.isGenerating}
-                className="absolute right-2 bottom-2 p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9-7-9-7V19z" /></svg>
+              <button onClick={handleSend} disabled={!prompt.trim() || appState.isGenerating} className="absolute right-4 bottom-4 p-4 bg-indigo-600 text-white rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M14 5l7 7-7 7" /></svg>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Right: Preview Area */}
-        <div className="flex-1 flex flex-col min-w-0 bg-slate-100 dark:bg-slate-950 p-4">
-          <div className="flex items-center gap-2 mb-4 shrink-0">
+        <div className={`flex-1 flex flex-col p-10 transition-colors ${isDarkMode ? 'bg-slate-950' : 'bg-slate-100/40'}`}>
+          <div className="mb-6 flex justify-center items-center gap-4">
+            <div className="bg-slate-200/50 dark:bg-slate-800/50 p-1 rounded-xl flex items-center backdrop-blur-sm border border-slate-300/20">
+              <button onClick={() => setActiveTab('preview')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'preview' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-indigo-600'}`}>Live Preview</button>
+              <button onClick={() => setActiveTab('code')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'code' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-indigo-600'}`}>Source Code</button>
+            </div>
+            
             <button 
-              onClick={() => setActiveTab('preview')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'preview' 
-                  ? 'bg-white dark:bg-slate-800 shadow-sm text-indigo-600' 
-                  : 'text-slate-500 hover:bg-white/50'
-              }`}
+              onClick={handleViewLiveInBrowser}
+              className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-indigo-600 transition-all shadow-sm flex items-center gap-2 group"
             >
-              Preview
-            </button>
-            <button 
-              onClick={() => setActiveTab('code')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'code' 
-                  ? 'bg-white dark:bg-slate-800 shadow-sm text-indigo-600' 
-                  : 'text-slate-500 hover:bg-white/50'
-              }`}
-            >
-              Code
+              <span>View Fullscreen</span>
+              <svg className="w-3 h-3 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
             </button>
           </div>
-          
-          <div className="flex-1 min-h-0">
+
+          <div className={`flex-1 min-h-0 rounded-[3.5rem] border-4 overflow-hidden shadow-2xl ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-white'}`}>
             {activeTab === 'preview' ? (
               <AppPreview code={appState.currentCode} />
             ) : (
-              <div className={`w-full h-full rounded-xl border p-4 font-mono text-sm overflow-auto ${
-                isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-800'
-              }`}>
-                <pre>{appState.currentCode || '// No code generated yet'}</pre>
-              </div>
+              <textarea
+                value={appState.currentCode}
+                onChange={(e) => setAppState(prev => ({ ...prev, currentCode: e.target.value }))}
+                className="w-full h-full p-12 font-mono text-sm bg-slate-950 text-indigo-300 outline-none resize-none leading-relaxed overflow-auto no-scrollbar"
+                spellCheck={false}
+              />
             )}
           </div>
         </div>
@@ -340,5 +296,4 @@ const App: React.FC = () => {
   );
 };
 
-// Fix for index.tsx: Module '"file:///App"' has no default export.
 export default App;

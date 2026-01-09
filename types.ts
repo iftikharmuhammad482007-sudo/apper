@@ -6,6 +6,7 @@ export interface DeployedApp {
   code: string;
   timestamp: number;
   author: string;
+  domain?: string; // The custom planet domain chosen by the user
 }
 
 export interface Message {
@@ -19,5 +20,5 @@ export interface AppState {
   messages: Message[];
   currentCode: string;
   isGenerating: boolean;
-  status: 'idle' | 'generating' | 'error' | 'published';
+  status: 'idle' | 'generating' | 'error' | 'published' | 'choosing_domain';
 }
