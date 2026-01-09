@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Message } from "../types";
 
@@ -27,7 +28,14 @@ CRITICAL CODE RULES:
 `;
 
 export const generateAppCode = async (prompt: string, history: Message[], systemPromptModifier?: string): Promise<{ text: string; code: string }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Accessing the API key
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("AI Engine Error: API_KEY is not defined. If you deployed this on Netlify, please go to Site Settings > Environment Variables and add 'API_KEY'.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   
   const contents = history.map(msg => ({
     role: msg.role === 'user' ? 'user' : 'model',
@@ -43,20 +51,32 @@ export const generateAppCode = async (prompt: string, history: Message[], system
     ? `${SYSTEM_INSTRUCTION}\n\nUser Specific Instructions:\n${systemPromptModifier}`
     : SYSTEM_INSTRUCTION;
 
-  const response: GenerateContentResponse = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: contents as any,
-    config: {
-      systemInstruction: finalSystemInstruction,
-      temperature: 0.7,
-      thinkingConfig: { thinkingBudget: 4000 }
-    },
-  });
+  try {
+    const response: GenerateContentResponse = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: contents as any,
+      config: {
+        systemInstruction: finalSystemInstruction,
+        temperature: 0.7,
+        thinkingConfig: { thinkingBudget: 4000 }
+      },
+    });
 
-  const fullText = response.text || '';
-  const codeMatch = fullText.match(/```(?:tsx|jsx|javascript|typescript|react)\n?([\s\S]*?)```/);
-  const code = codeMatch ? codeMatch[1].trim() : '';
-  const text = fullText.replace(/```[\s\S]*?```/g, '').trim();
+    const fullText = response.text || '';
+    const codeMatch = fullText.match(/```(?:tsx|jsx|javascript|typescript|react)\n?([\s\S]*?)```/);
+    const code = codeMatch ? codeMatch[1].trim() : '';
+    const text = fullText.replace(/```[\s\S]*?```/g, '').trim();
 
-  return { text, code };
+    if (!code && !text) {
+      throw new Error("The AI returned an empty response. Please try rephrasing your request.");
+    }
+
+    return { text, code };
+  } catch (error: any) {
+    console.error("Gemini API Error:", error);
+    if (error?.message?.includes('API key not valid')) {
+      throw new Error("Invalid API Key. Please check your MBI Developers portal or environment settings.");
+    }
+    throw error;
+  }
 };
